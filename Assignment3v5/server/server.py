@@ -7,6 +7,10 @@ import datetime         # for composing date/time stamp
 import sys              # handle system error
 import traceback        # for print_exc function
 import time             # for delay purpose
+import Cryptodome.Cipher.AES as AES
+import hashlib
+
+import os
 global host, port
 
 cmd_GET_MENU = "GET_MENU"
@@ -16,6 +20,14 @@ default_save_base = "result-"
 
 host = socket.gethostname() # get the hostname or ip address
 port = 8888                 # The port used by the server
+key = os.urandom(32)
+key2 = os.urandom(32)
+
+
+def encrypt_aes(key, plaintext):
+    cipher = AES.new(key, AES.MODE_EAX)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    return (cipher.nonce + ciphertext)
 
 def process_connection( conn , ip_addr, MAX_BUFFER_SIZE):  
     blk_count = 0
@@ -34,8 +46,14 @@ def process_connection( conn , ip_addr, MAX_BUFFER_SIZE):
                     read_bytes = src_file.read(MAX_BUFFER_SIZE)
                     if read_bytes == b'':
                         break
-                    #hints: you may apply a scheme (hashing/encryption) to read_bytes before sending to client.
-                    conn.send(read_bytes)
+                    openedFile = open(default_menu)
+                    readFile = openedFile.read()
+                    menu_hashed = hashlib.sha256(readFile.encode())
+                    encrypted_hash_menu = encrypt_aes(key2, menu_hashed)
+                    
+                    encrypted_read_bytes = encrypt_aes(key, read_bytes)
+                    conn.send(encrypted_read_bytes)
+                    conn.send(encrypted_hash_menu)
                 src_file.close()
                 print("Processed SENDING menu") 
                 return
@@ -47,12 +65,14 @@ def process_connection( conn , ip_addr, MAX_BUFFER_SIZE):
 
                 # Hints: net_bytes may be an encrypted block of message.
                 # e.g. plain_bytes = my_decrypt(net_bytes)
-                dest_file.write( net_bytes[ len(cmd_END_DAY): ] ) # remove the CLOSING header    
+                encrypted_net_bytes = encrypt_aes(key, net_bytes[ len(cmd_END_DAY): ])
+                dest_file.write( encrypted_net_bytes ) # remove the CLOSING header    
                 blk_count = blk_count + 1
         else:  # write subsequent blocks of END_DAY message block
             # Hints: net_bytes may be an encrypted block of message.
             net_bytes = conn.recv(MAX_BUFFER_SIZE)
-            dest_file.write(net_bytes)
+            encrypted_net_bytes = encrypt_aes(key, net_bytes)
+            dest_file.write(encrypted_net_bytes)
     # last block / empty block
     dest_file.close()
     print("saving file as " + filename)
@@ -105,4 +125,4 @@ def start_server():
     soc.close()
     return
 
-start_server()  
+start_server()
