@@ -96,23 +96,6 @@ def client_thread(conn, ip, port, MAX_BUFFER_SIZE = 4096):
 
 def start_server():
     global host, port
-    # Generate the RSA keypair
-    key = RSA.generate(2048) 
-
-    # Export the private key
-    private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=b"server") 
-    with open("private.pem", "wb") as f: 
-        f.write(private_key) 
-
-    # Export the public key
-    public_key = key.publickey().export_key()
-
-    # Convert the RSA public key to bytes
-    public_key_bytes = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    
     # Here we made a socket instance and passed it two parameters. AF_INET and SOCK_STREAM. 
     soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # this is for easy starting/killing the app
@@ -132,34 +115,6 @@ def start_server():
     soc.listen(10)
     print('Socket now listening')
 
-    
-    # Generate the RSA keypair
-    key = RSA.generate(2048) 
-
-    # Export the private key
-    private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=b"server") 
-    with open("private.pem", "wb") as f: 
-        f.write(private_key) 
-
-    # Export the public key
-    public_key = key.publickey().export_key()
-
-    # Load the public key as a RSA object
-    public_key_rsa = serialization.load_pem_public_key(
-        public_key,
-        backend=default_backend()
-    )
-
-    # Convert the RSA public key to bytes
-    public_key_bytes = public_key_rsa.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((host, port))
-    client_socket.send(public_key_bytes)
-
     # this will make an infinite loop needed for 
     # not reseting server for every client
     # this will make an infinite loop needed for 
@@ -172,6 +127,14 @@ def start_server():
             # assign ip and port
             ip, port = str(addr[0]), str(addr[1])
             print('Accepting connection from ' + ip + ':' + port)
+            public_pem = conn.recv(4096)
+            public_key = serialization.load_pem_public_key(
+            public_pem,
+            backend=default_backend()
+            )
+            client_public_key = public_key
+            print("You have received the nigga's pblic key!!!!")
+            print(client_public_key)
             try:
                 Thread(target=client_thread, args=(conn, ip, port)).start()
             except:
@@ -182,54 +145,4 @@ def start_server():
     soc.close()
     return
 
-'''private_key = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048,
-    backend=default_backend()
-)
-
-private_key_pem = private_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption()
-)
-
-public_key = private_key.public_key()
-public_key_pem = public_key.public_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PublicFormat.SubjectPublicKeyInfo
-)
-
-subject = issuer = x509.Name([
-    x509.NameAttribute(NameOID.COUNTRY_NAME, u"SG"),
-    x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"SP"),
-    x509.NameAttribute(NameOID.LOCALITY_NAME, u"ACG"),
-    x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"ACG Demo"),
-    x509.NameAttribute(NameOID.COMMON_NAME, u"Client 2205513"),
-])
-
-cert = x509.CertificateBuilder().subject_name(
-    subject
-).issuer_name(
-    issuer
-).public_key(
-    public_key
-).serial_number(
-    x509.random_serial_number()
-).not_valid_before(
-    datetime.datetime.utcnow()
-).not_valid_after(
-    # Our certificate will be valid for 10 years
-    datetime.datetime.utcnow() + datetime.timedelta(days=3650)
-).sign(private_key, hashes.SHA256(), default_backend())
-
-cert_pem = cert.public_bytes(serialization.Encoding.PEM)
-
-with open("private_key.pem", "wb") as f:
-    f.write(private_key_pem)    
-
-with open("server_cert.crt", "wb") as cert_file: 
-  cert_file.write(cert_pem)
-
-start_server()'''
 start_server()
