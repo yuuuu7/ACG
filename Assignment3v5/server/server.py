@@ -16,6 +16,9 @@ from cryptography.x509.oid import NameOID
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from Cryptodome.PublicKey import RSA
+from Cryptodome.Cipher import PKCS1_OAEP
+
 import ssl
 import os
 global host, port
@@ -27,8 +30,7 @@ default_save_base = "result-"
 
 host = socket.gethostname() # get the hostname or ip address
 port = 8888                 # The port used by the server
-key = os.urandom(32)
-key2 = os.urandom(32)
+
 
 def encrypt_aes(key, plaintext):
     cipher = AES.new(key, AES.MODE_EAX)
@@ -94,14 +96,23 @@ def client_thread(conn, ip, port, MAX_BUFFER_SIZE = 4096):
 
 def start_server():
     global host, port
-    # Load the self-signed certificate and private key
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    # Set the verify mode to CERT_REQUIRED to enforce certificate verification
-    context.verify_mode = ssl.CERT_REQUIRED
-    # Load the certificate and private key
-    context.load_cert_chain(certfile="server_cert.crt", keyfile="private_key.pem")
-    # Load the CA certificates
-    context.load_verify_locations(cafile='./server_cert.crt')
+    # Generate the RSA keypair
+    key = RSA.generate(2048) 
+
+    # Export the private key
+    private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=b"server") 
+    with open("private.pem", "wb") as f: 
+        f.write(private_key) 
+
+    # Export the public key
+    public_key = key.publickey().export_key()
+
+    # Convert the RSA public key to bytes
+    public_key_bytes = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+    
     # Here we made a socket instance and passed it two parameters. AF_INET and SOCK_STREAM. 
     soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # this is for easy starting/killing the app
@@ -121,25 +132,45 @@ def start_server():
     soc.listen(10)
     print('Socket now listening')
 
+    
+    # Generate the RSA keypair
+    key = RSA.generate(2048) 
+
+    # Export the private key
+    private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=b"server") 
+    with open("private.pem", "wb") as f: 
+        f.write(private_key) 
+
+    # Export the public key
+    public_key = key.publickey().export_key()
+
+    # Load the public key as a RSA object
+    public_key_rsa = serialization.load_pem_public_key(
+        public_key,
+        backend=default_backend()
+    )
+
+    # Convert the RSA public key to bytes
+    public_key_bytes = public_key_rsa.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
+
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((host, port))
+    client_socket.send(public_key_bytes)
+
     # this will make an infinite loop needed for 
     # not reseting server for every client
     # this will make an infinite loop needed for 
+    # not reseting server for every client
+     # this will make an infinite loop needed for 
     # not reseting server for every client
     try:
         while True:
             conn, addr = soc.accept()
-            # Upgrade the connection to use SSL/TLS
-            conn = context.wrap_socket(conn, server_side=True)
-            # Check if the certificate presented by the client is valid
-            try:
-                ssl.match_hostname(conn.getpeercert(), host)
-            except ssl.CertificateError:
-                print('Invalid certificate presented by the client')
-                conn.close()
-                continue
             # assign ip and port
             ip, port = str(addr[0]), str(addr[1])
-            print("SUCCESSFUL CERT AUTHENTICATION")
             print('Accepting connection from ' + ip + ':' + port)
             try:
                 Thread(target=client_thread, args=(conn, ip, port)).start()
@@ -201,3 +232,4 @@ with open("server_cert.crt", "wb") as cert_file:
   cert_file.write(cert_pem)
 
 start_server()'''
+start_server()

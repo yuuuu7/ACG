@@ -23,7 +23,6 @@ cmd_GET_MENU = b"GET_MENU"
 cmd_END_DAY = b"CLOSING"
 menu_file = "menu.csv"
 return_file = "day_end.csv"
-key = os.urandom(32) # generate a 32-byte key for encryption
 
 def encrypt_data(data, key):
     backend = default_backend()
@@ -43,12 +42,38 @@ def initialize_keys(password: str):
         print(f"Authenticity of private key could not be verified. Ensure that the key is correct.") 
         sys.exit()
 
-key = RSA.generate(2048) 
-passphrase = b"server" 
-private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=passphrase) 
-with open("private.pem", "wb") as f: 
-    f.write(private_key) 
+''' # Generate a key pair for the client
+key = RSA.generate(2048)
+passphrase = b"client"
+private_key = key.export_key(pkcs=8, protection="scryptAndAES128-CBC", passphrase=passphrase)
+with open("private.pem", "wb") as f:
+    f.write(private_key)
 public_key = key.publickey().export_key()
+
+public_key_bytes = public_key.public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo
+)
+
+# Connect to the server
+client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client_socket.connect((host, port))
+
+# Send the client's public key to the server
+client_socket.send(public_key_bytes)
+
+# Receive the server's public key bytes
+server_public_key_bytes = client_socket.recv(4096)
+
+# Load the server's public key
+server_public_key = serialization.load_pem_public_key(
+    server_public_key_bytes,
+    backend=default_backend()
+)
+
+# Save the server's public key to a file
+with open("server_public.pem", 'wb') as f:
+    f.write(server_public_key) '''
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as my_socket:
     my_socket.connect((host, port))
