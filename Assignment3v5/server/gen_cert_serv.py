@@ -1,10 +1,13 @@
+import Cryptodome.Cipher.AES as AES
 from Cryptodome.PublicKey import RSA
+from Cryptodome.Hash import SHA256
+from Crypto.Signature import pkcs1_15
+from Cryptodome.Cipher import PKCS1_OAEP
 from cryptography import x509 
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import serialization 
-from cryptography.hazmat.backends import default_backend 
+from cryptography.x509.oid import NameOID 
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
-from cryptography.hazmat.primitives import hashes 
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.backends import default_backend
 import datetime, sys
 from Cryptodome.Cipher import PKCS1_OAEP
 from threading import Thread    # for handling task in separate jobs we need threading
@@ -13,20 +16,42 @@ import datetime         # for composing date/time stamp
 import sys              # handle system error
 import traceback        # for print_exc function
 import time             # for delay purpose
-import Cryptodome.Cipher.AES as AES
-import hashlib
-from cryptography import x509
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization, hashes, padding
-from cryptography.x509.oid import NameOID 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from Cryptodome.PublicKey import RSA
-from Cryptodome.Cipher import PKCS1_OAEP
 
 import ssl
 import os
+
+with open("server_priv.pem", "rb") as f:
+    private_key = RSA.import_key(f.read(), passphrase="server")
+    public_key = private_key.publickey().export_key()
+
+def verify_signature(file_content, signature):
+    public_key = RSA.import_key(client_public)
+    hashed_file_data = SHA256.new(file_content)
+
+    # Verify the signature using the public key and the pkcs1_15 scheme
+    try:
+        pkcs1_15.new(public_key).verify(hashed_file_data, signature)
+        return True
+    except Exception:
+        print("Error has occured")
+
+def gen_digital_signature(file_contents, passphrase: str):
+        # Open the file and read its contents
+        with open("server_priv.pem", 'rb') as f:
+            private_key = f.read()
+
+        # Create an RSA object from the private key
+        server_private_key = RSA.import_key(private_key, passphrase.encode())
+
+        # Create a SHA256 hash of the message
+        hashed_file_data = SHA256.new(file_contents)
+
+        # Sign the hash using the private key and the pkcs1_15 signing scheme
+        signed_hashed_file = pkcs1_15.new(server_private_key).sign(hashed_file_data)
+
+        return signed_hashed_file
+
+
 
 def initialize_keys(password: str): 
   try: 
@@ -79,17 +104,63 @@ def verify_client_cert(x):
         return True
     except Exception:
         return False
-        
+
+def encrypt_message(message):
+    global client_public
+    client_public = RSA.import_key(client_public)
+    cipher_rsa = PKCS1_OAEP.new(client_public)
+    return cipher_rsa.encrypt(message)
+    
+
+def encrypt_aes(key, file_contents):
+    cipher = AES.new(key, AES.MODE_ECB)
+    ciphertext = cipher.encrypt(file_contents)
+    return ciphertext
+
+def process_connection(conn , ip_addr, MAX_BUFFER_SIZE):  
+    blk_count = 0
+    net_bytes = conn.recv(MAX_BUFFER_SIZE)
+    dest_file = open("temp","w")  # temp file is to satisfy the syntax rule. Can ignore the file.
+    while net_bytes != b'':
+        if blk_count == 0: #  1st block
+            usr_cmd = net_bytes[0:15].decode("utf8").rstrip()
+            if cmd_GET_MENU in usr_cmd: # ask for menu
+                try:
+                    menu_file = open(default_menu,"rb")
+                except:
+                    print("file not found : " + default_menu)
+                    sys.exit(0)
+                while True:
+                    with open(default_menu, 'rb') as f:
+                        menu_file_contents = f.read()
+                    if menu_file_contents == b'':
+                        break
+                    #insert encrypted file contents here later
+                    gen_digital_signature(menu_file_contents, 'server')
+                    #items_to_be_sent = menu_file_contents + b"||" + signed_menu
+                    #print(menu_file_contents + b"||" + signed_menu)
+                    #conn.sendall(items_to_be_sent)
+                    #conn.send(encrypted_hash_menu)
+                #menu_file.close()
+                #print("Menu and A Hashed + Signed Menu has been sent") 
+                return
+            elif cmd_END_DAY in usr_cmd: # ask for to save end day order
+                #Hints: the net_bytes after the cmd_END_DAY may be encrypted. 
+                now = datetime.datetime.now()
+                filename = default_save_base +  ip_addr + "-" + now.strftime("%Y-%m-%d_%H%M")                
+                dest_file = open(filename,"wb")
+
+                # Hints: net_bytes may be an encrypted block of message.
+                # e.g. plain_bytes = my_decrypt(net_bytes)  
+                blk_count = blk_count + 1
         
 
+cmd_GET_MENU = "GET_MENU"
+cmd_END_DAY = "CLOSING"
+default_menu = "menu_today.txt"
+default_save_base = "result-"
 private_key = "server_priv.pem" 
 cert_name = "server_cert.crt" 
-with open(private_key, "rb") as key_file: 
-    private_key = serialization.load_pem_private_key( 
-    key_file.read(), 
-    password=b"server", 
-    backend=default_backend() 
-) 
 
 host = socket.gethostname()
 port = 8888
@@ -113,6 +184,7 @@ def start_server():
     #Start listening on socket and can accept 10 connection
     soc.listen(10)
     print('Socket now listening')
+    AES_session_key = os.urandom(32) # generate a 32-byte key for AES-256
 
     # this will make an infinite loop needed for 
     # not reseting server for every client
@@ -129,12 +201,7 @@ def start_server():
             print('Accepting connection from ' + ip + ':' + port + "\n")
 
             try:
-                public_key = private_key.public_key()
-                public_pem = public_key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
-                conn.sendall(public_pem)
+                conn.sendall(public_key)
                 print("You have sent Client your Public Key!")
                 time.sleep(0.4)
             except:
@@ -142,11 +209,9 @@ def start_server():
                 sys.exit()
 
             try:
-                client_public_pem = conn.recv(4096)
-                client_public_key = serialization.load_pem_public_key(
-                client_public_pem,
-                backend=default_backend()
-                )
+                global client_public
+                client_public_key = conn.recv(4096)
+                client_public = client_public_key.decode()
                 print("You have received the Client's public key!")
                 time.sleep(0.4)
             except:
@@ -176,19 +241,70 @@ def start_server():
                 print("Error")
                 sys.exit()
             
-            validated = True
+            try:
+                print(AES_session_key)
+                enc_aes_key = encrypt_message(AES_session_key)
+                conn.sendall(enc_aes_key)
+                print("Successfully sent the new AES Session Key to Client")
+            except:
+                print("Error in sending AES Key over to Client.")
             
+        
+            validated = True
+
             if validated == True:
                 while True:
-                    conn, addr = soc.accept()
-                    # assign ip and port
-                    ip, port = str(addr[0]), str(addr[1])
                     print("\nClient Verified!")
                     print('Establishing connection with ' + ip + ':' + port + "\n")
-                    input('Enter to close server...')
-                    sys.exit()
+                    blk_count = 0
+                    net_bytes = conn.recv(4096)
+                    dest_file = open("temp","w")  # temp file is to satisfy the syntax rule. Can ignore the file.
+                    while net_bytes != b'':
+                        if blk_count == 0: #  1st block
+                            usr_cmd = net_bytes[0:15].decode("utf8").strip()
+                            if cmd_GET_MENU in usr_cmd: # ask for menu
+                                try:
+                                    menu_file = open(default_menu,"rb")
+                                except:
+                                    print("file not found : " + default_menu)
+                                    sys.exit(0)
+                                while True:
+                                    with open(default_menu, 'rb') as f:
+                                        menu_file_contents = f.read()
+                                    if menu_file_contents == b'':
+                                        break
+                                    #insert encrypted file contents here later
+                                    signed_menu = gen_digital_signature(menu_file_contents, 'server')
+                                    enc_data = encrypt_aes(AES_session_key ,menu_file_contents)
+                                    print(enc_data)
+                                    items_to_be_sent = enc_data + b"||" + signed_menu
+                                    conn.sendall(items_to_be_sent)
+                                    menu_file.close()
+                                    break
+                            elif cmd_END_DAY in usr_cmd: # ask for to save end day order
+                                now = datetime.datetime.now()
+                                filename = default_save_base +  ip + "-" + now.strftime("%Y-%m-%d_%H%M")                
+                                dest_file = open(filename,"wb")
+
+                                # Hints: net_bytes may be an encrypted block of message.
+                                # e.g. plain_bytes = my_decrypt(net_bytes)
+                                net_bytes = conn.recv(4096)
+                                signature = conn.recv(4096)
+                                if verify_signature(net_bytes, signature):
+                                    print("File contents have not been altered and Data did indeed come from Client")
+                                    dest_file.write(net_bytes) # remove the CLOSING header    
+                                    blk_count = blk_count + 1
+                                else:
+                                    print("Invalid Signature. File contents are either altered or sent by a third party. File was not saved.")
+                                    sys.exit()
+    
+                        # Hints: net_bytes may be an encrypted block of message.
+                        # e.g. plain_bytes = my_decrypt(net_bytes
+                        input('Enter to close server...')
+                        sys.exit()
+
             else:
-                break
+                sys.exit()
             
 
 

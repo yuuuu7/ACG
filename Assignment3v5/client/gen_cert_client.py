@@ -1,6 +1,9 @@
 from Cryptodome.PublicKey import RSA
+import Cryptodome.Cipher.AES as AES
 from cryptography import x509 
-from cryptography.x509.oid import NameOID 
+from cryptography.x509.oid import NameOID
+from Cryptodome.Hash import SHA256
+from Crypto.Signature import pkcs1_15
 from cryptography.hazmat.primitives import serialization 
 from cryptography.hazmat.backends import default_backend 
 from cryptography.hazmat.primitives import hashes
@@ -11,6 +14,14 @@ from Cryptodome.Cipher import PKCS1_OAEP
 
 private_key = "client_priv.pem" 
 cert_name = "client_cert.crt" 
+cmd_GET_MENU = b"GET_MENU"
+cmd_END_DAY = b"CLOSING"
+menu_file = "menu.csv"
+return_file = "day_end.csv"
+
+with open("client_priv.pem", "rb") as f:
+    private_key = RSA.import_key(f.read(), passphrase="client")
+    public_key = private_key.publickey().export_key()
 
 def cert_gen():
     builder = x509.CertificateBuilder() 
@@ -55,21 +66,46 @@ def verify_server_cert(x):
     except Exception:
         return False
 
-with open(private_key, "rb") as key_file: 
-    private_key = serialization.load_pem_private_key( 
-    key_file.read(), 
-    password=b"client", 
-    backend=default_backend() 
-) 
+def verify_signature(file_content, signature):
+    public_key = RSA.import_key(server_public)
+    hashed_file_data = SHA256.new(file_content)
+
+    # Verify the signature using the public key and the pkcs1_15 scheme
+    try:
+        pkcs1_15.new(public_key).verify(hashed_file_data, signature)
+        return True
+    except Exception:
+        return False
 
 
-public_key = private_key.public_key()
-public_pem = public_key.public_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PublicFormat.SubjectPublicKeyInfo
-)
+def decrypt_aes(key, file_contents):
+    cipher = AES.new(key, AES.MODE_ECB)
+    plaintext = cipher.decrypt(file_contents)
+    return plaintext
+
+
+def gen_digital_signature(file_contents, passphrase: str):
+        # Open the file and read its contents
+        with open("client_priv.pem", 'rb') as f:
+            private_key = f.read()
+
+        # Create an RSA object from the private key
+        client_private_key = RSA.import_key(private_key, passphrase.encode())
+
+        # Create a SHA256 hash of the message
+        hashed_file_data = SHA256.new(file_contents)
+
+        # Sign the hash using the private key and the pkcs1_15 signing scheme
+        signed_hashed_file = pkcs1_15.new(client_private_key).sign(hashed_file_data)
+
+        return signed_hashed_file
+
+def decrypt_message(ciphertext):
+    cipher_rsa = PKCS1_OAEP.new(private_key)
+    return cipher_rsa.decrypt(ciphertext)
 
 host = socket.gethostname()
+port = 8888
 
 validated = False
 while validated == False:
@@ -78,17 +114,14 @@ while validated == False:
     sock.connect(server_address)
 
     try:
-        server_public_pem = sock.recv(4096)
-        server_public_key = serialization.load_pem_public_key(
-        server_public_pem,
-        backend=default_backend()
-        )
+        server_public_key = sock.recv(4096)
+        server_public = server_public_key.decode()
         print("You have received the Server's public key!")
     except:
         print("An Error has Occured while trying to receive the Public Key.")
 
     try:
-        sock.sendall(public_pem)
+        sock.sendall(public_key)
         print("Successfully sent your Public Key to the Server!")
     except:
         print("An Error Occured during the sending of your Public Key to the Server.")
@@ -116,18 +149,65 @@ while validated == False:
     except:
         print("An Error occured while sending your Certificate to the client.")
         sys.exit()
+
+    try:
+        AES_key = sock.recv(4096)
+        dec_aes_key = decrypt_message(AES_key)
+        aes_session_key = dec_aes_key
+        print(aes_session_key)
+        print("Successfully received Shared AES Session Key.")
+    except:
+        print("Error occured while trying to receive the Session Key.")
     
     validated = True
-    break
-    
-if validated == True:
-    print("\nSuccessfully verified identities of Server and Client! Establishing a connection with the server...")
-    time.sleep(0.4)
-    server_address = (host, 8888)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(server_address)
-    input("Enter to break connection...")
-    sys.exit()
+
+    if validated == True:
+        while True:
+            print("\n1. Get the menu of the day\n2. Send day_end to server\n3. Quit")
+            user_input = input("\n>>")
+            if user_input == '1':
+                sock.sendall(cmd_GET_MENU)
+                incoming_data = sock.recv(4096)
+                incoming_data = incoming_data.split(b'||')
+
+                enc_original_data = incoming_data[0]
+                original_data = decrypt_aes(aes_session_key, enc_original_data)
+                signed_hash_data = incoming_data[1]
+
+                if verify_signature(original_data, signed_hash_data):
+                    print("File contents have not been altered and Data did indeed come from Server")
+                    menu_file = open('menu.csv',"wb")
+                    menu_file.write(original_data)
+                    menu_file.close()
+                    sock.close()
+                    print('Menu today received from server')
+                    sock.close()
+                else:
+                    print("Invalid Signature. File contents are either altered or sent by a third party. File was not saved.")
+                    sys.exit()
+                
+            elif user_input == '2':
+                sock.sendall(cmd_END_DAY)
+                try:
+                    day_end_outgoing = open(return_file,"rb")
+                except:
+                    print("file not found : " + return_file)
+                    sys.exit(0)
+                file_bytes = day_end_outgoing.read(1024)
+                sent_bytes=b''
+                while file_bytes != b'': 
+                    sock.send(file_bytes)
+                    sent_bytes+=file_bytes
+                    file_bytes = day_end_outgoing.read(1024) # read next block from file
+                signed_day_end = gen_digital_signature(sent_bytes, 'client')
+                sock.send(signed_day_end)
+                day_end_outgoing.close()
+                sock.close()
+                print('Sale of the day sent to server')
+            elif user_input == '3':
+                sock.close()
+                sys.exit()
+
 
 
 

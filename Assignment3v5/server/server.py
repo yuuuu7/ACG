@@ -34,8 +34,8 @@ port = 8888                 # The port used by the server
 
 def encrypt_aes(key, plaintext):
     cipher = AES.new(key, AES.MODE_EAX)
-    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
-    return (cipher.nonce + ciphertext)
+    ciphertext, tag = cipher.encrypt(plaintext)
+    return ciphertext
 
 def process_connection( conn , ip_addr, MAX_BUFFER_SIZE):  
     blk_count = 0
