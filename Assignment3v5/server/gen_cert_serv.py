@@ -3,6 +3,7 @@ from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import serialization 
 from cryptography.hazmat.backends import default_backend 
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives import hashes 
 import datetime, sys
 from Cryptodome.Cipher import PKCS1_OAEP
@@ -63,21 +64,23 @@ def gen_cert():
         cert_file.write(certificate.public_bytes(encoding=serialization.Encoding.PEM))
              # The port used by the server
 
-def verify_client_cert(cert):
+def verify_client_cert(x):
     with open("client_cert.crt", "rb") as f:
         client_cert_data = f.read()
         correct_client_cert = x509.load_pem_x509_certificate(client_cert_data, default_backend())
-        client_cert = x509.load_pem_x509_certificate(cert, default_backend())
-        try:
-            client_cert.public_key().verify(
-                client_cert.signature,
-                correct_client_cert.tbs_certificate_bytes,
-                padding.PKCS1v15(),
-                client_cert.signature_hash_algorithm,
-            )
-            return True
-        except Exception:
-            return False
+    try:
+        client_cert = x509.load_pem_x509_certificate(x, default_backend())
+        client_cert.public_key().verify(
+            client_cert.signature,
+            correct_client_cert.tbs_certificate_bytes,
+            PKCS1v15(),
+            client_cert.signature_hash_algorithm,
+        )
+        return True
+    except Exception:
+        return False
+        
+        
 
 private_key = "server_priv.pem" 
 cert_name = "server_cert.crt" 
@@ -118,32 +121,12 @@ def start_server():
      # this will make an infinite loop needed for 
     # not reseting server for every client
     try:
-        while True:
+        validated = False
+        while validated == False:
             conn, addr = soc.accept()
             # assign ip and port
             ip, port = str(addr[0]), str(addr[1])
-            print('Accepting connection from ' + ip + ':' + port)
-
-            try:
-                with open("server_cert.crt", "rb") as file:
-                    server_cert_data = file.read()
-                conn.sendall(server_cert_data)
-                print('SENT')
-            except:
-                print("An Error has Occured while sending the Server Certificate.")
-
-            
-            incoming_client_cert_data = b''
-            while True:
-                chunk = soc.recv(4096)
-                if not chunk:
-                    break
-                incoming_client_cert_data += chunk
-            if verify_client_cert(incoming_client_cert_data):
-                print("The Client's Certificate is Valid")
-            else:
-                print("The Client's certificate is invalid")
-                sys.exit()
+            print('Accepting connection from ' + ip + ':' + port + "\n")
 
             try:
                 public_key = private_key.public_key()
@@ -153,9 +136,10 @@ def start_server():
                 )
                 conn.sendall(public_pem)
                 print("You have sent Client your Public Key!")
+                time.sleep(0.4)
             except:
                 print("An Error has Occured while sending the Public Key.")
-            
+                sys.exit()
 
             try:
                 client_public_pem = conn.recv(4096)
@@ -164,9 +148,49 @@ def start_server():
                 backend=default_backend()
                 )
                 print("You have received the Client's public key!")
-                print(client_public_pem)
+                time.sleep(0.4)
             except:
                 print("An Error has Occured while trying to receive the Public Key.")
+                sys.exit()
+
+
+            try:
+                with open("server_cert.crt", "rb") as file:
+                    server_cert_data = file.read()
+                conn.sendall(server_cert_data)
+                print("\nServer's Certificate has been sent over to the client successfully!")
+            except:
+                print("An Error has Occured while sending the Server Certificate.")
+                sys.exit()
+
+            try:
+                incoming_client_cert_data = conn.recv(4096)
+                print("\nClient's Certificate received")
+                print("Verifying the incoming Client Certificate...")
+                if verify_client_cert(incoming_client_cert_data):
+                    print("The Client's Certificate is Valid")
+                else:
+                    print("The Client's certificate is invalid")
+                    sys.exit()
+            except:
+                print("Error")
+                sys.exit()
+            
+            validated = True
+            
+            if validated == True:
+                while True:
+                    conn, addr = soc.accept()
+                    # assign ip and port
+                    ip, port = str(addr[0]), str(addr[1])
+                    print("\nClient Verified!")
+                    print('Establishing connection with ' + ip + ':' + port + "\n")
+                    input('Enter to close server...')
+                    sys.exit()
+            else:
+                break
+            
+
 
     
             
