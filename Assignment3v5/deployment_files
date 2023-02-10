@@ -1,0 +1,13 @@
+Private Keys:
+
+client_priv.pem
+server_priv.pem
+
+Public Keys:
+
+*Public keys are stored locally as a variable within the code*
+
+Self-Signed Certificates:
+
+server_cert.crt
+client_cert.crt

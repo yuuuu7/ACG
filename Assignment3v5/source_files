@@ -1,0 +1,11 @@
+Source files:
+
+Client:
+.\client\client.py
+.\client\RSA_Keypair_gen.py
+.\client\TEST_enc_dec_menu.py
+
+Server:
+.\server\server.py
+.\server\RSA_Keypair_gen.py
+.\server\TEST_enc_dec_day_end.py

@@ -1,0 +1,24 @@
+Code:
+
+Lim Yu Liang (p2227452):
+
+Digital Signature 
+Self-signed Certificates 
+AES Encryption
+Data at rest (Public/Private key encryption)
+Data in transit (AES Encryption + Digital Signature)
+Certificate Authentication (Before establishing a connection)
+Public Key exchange
+Shared Session Key (AES Key)
+Added menu for functionality
+
+In summary, the entire code was done by me (Yu Liang)
+
+Bryan:
+-
+
+Mathan
+-
+
+Sugam:
+-
